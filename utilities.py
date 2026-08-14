@@ -11,6 +11,7 @@ import natsort
 from itertools import repeat
 import numpy as np
 from matplotlib import pyplot as plt
+import subprocess
 plt.rcParams["figure.dpi"] = 200
 
 
@@ -109,7 +110,6 @@ def create_lut(in_lab, in_res, in_domain):
     rbf_func = []
     for i in range(3):
         rbf_func.append(scint.Rbf(in_lab[0], in_lab[1], in_lab[2], in_res[i], epsilon=settings.correction_epsilon))
-
     interp_table = (np.clip(rbf_func[0](lab_i[0], lab_i[1], lab_i[2]), 0, 100),
                     np.clip(rbf_func[1](lab_i[0], lab_i[1], lab_i[2]), -100, 100),
                     np.clip(rbf_func[2](lab_i[0], lab_i[1], lab_i[2]), -100, 100))
@@ -117,7 +117,6 @@ def create_lut(in_lab, in_res, in_domain):
     interp_table = np.concatenate(np.array(interp_table).T, axis=-1).reshape((len(edges[0]),
                                                                               len(edges[0]),
                                                                               len(edges[0]), 3))
-
     out_lut = colour.LUT3D(interp_table, 'correction', in_domain, settings.lut_size)    # Create 3D LUT
 
     return out_lut
@@ -209,3 +208,4 @@ def int_prompt(prompt, input_range):
                 print("Value not in range.")
         except ValueError:
             print("Invalid input, only use numbers.")
+
