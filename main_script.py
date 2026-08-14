@@ -393,7 +393,9 @@ def main():
                 img_overlay, offset = image_manipulation.crop_target(img, target_template)
                 lu_corner_crop = (-min(0, offset[0]), -min(0, offset[1]))
                 offset = np.sum([offset, lu_corner_crop], axis=0)
-                img_overlay = (img_overlay[0][lu_corner_crop[1]:][lu_corner_crop[0]:], img_overlay[1])
+                # TODO: Remove commented line below - incorrect array slicing led to failed calibrations
+                #img_overlay = (img_overlay[0][lu_corner_crop[1]:][lu_corner_crop[0]:], img_overlay[1])
+                img_overlay = (img_overlay[0][lu_corner_crop[1]:, lu_corner_crop[0]:], img_overlay[1])
                 rd_corner_crop = (max(0, (offset[0] + img_overlay[0].shape[1]) - target_c[0].shape[1]),
                                   max(0, (offset[1] + img_overlay[0].shape[0]) - target_c[0].shape[0]))
                 img_overlay = (img_overlay[0][:-(rd_corner_crop[1] + 1), :-(rd_corner_crop[0] + 1)], img_overlay[1])
