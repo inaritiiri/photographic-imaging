@@ -266,13 +266,31 @@ def read_image(img_name, sub_folder='Exported Images', col_depth=-1, convert=Tru
     return out_img
 
 
-def show_image(window_name, in_img, convert=True):
-    """Show image in window"""
+_save_counter = 0
+def show_image(window_name: object, in_img: object, convert: object = True, save_to_disk: object = False) -> object:
+    """Show image in window, with option to save to disk"""
+    global _save_counter
+
     if convert:
         # Convert to sRGB 8bit
         in_img = image_manipulation.convert_color(in_img, 'show')
-    cv.imshow(window_name, in_img[0])
-    cv.setWindowProperty(window_name, cv.WND_PROP_TOPMOST, 1)  # Set as top window
+
+    # Check if the image should be saved to disk
+    if save_to_disk:
+        _save_counter += 1
+        # Construct the file path and save the image
+        save_directory = os.path.join(settings.main_directory, settings.directories[3])
+        if not os.path.exists(save_directory):
+            os.makedirs(save_directory)
+
+        # Add an index to the filename to make it unique
+        file_name = f"{window_name.replace(' ', '_')}_{_save_counter}.png"
+        file_path = os.path.join(save_directory, file_name)
+        cv.imwrite(file_path, in_img[0])
+        print(f"Image saved to: {file_path}")
+    else:
+        cv.imshow(window_name, in_img[0])
+        cv.setWindowProperty(window_name, cv.WND_PROP_TOPMOST, 1)  # Set as top window
 
 
 def write_profile(in_name, in_lut, in_gray, in_metadata, in_ref_data, in_sample_data, ref_grid):
@@ -317,29 +335,13 @@ def write_profile(in_name, in_lut, in_gray, in_metadata, in_ref_data, in_sample_
     print(f"Profile '{in_name}' saved.")
 
 
-def read_profile(in_height):  # input height as string
-    """Read calibration profile based on focus height"""
-    try:
-        if in_height.strip() == '':
-            in_height = 10000  # Default to the highest correction profile, usually most accurate
-        calib_dist = int(in_height)
-        closest = (math.inf, 0)
-        for p in os.listdir(os.path.join(settings.main_directory, r'Calibration\Correction Profiles')):
-            try:
-                # Find the closest focus height profile
-                p_dist = int(str.split(p, '.')[0])
-                if abs(p_dist - calib_dist) < closest[0]:
-                    closest = (abs(p_dist - calib_dist), p_dist)
-            except ValueError:
-                pass
-        in_height = str(closest[1])
-    except ValueError:
-        pass
+def read_profile(in_name):  
+    """Read calibration profile based on the name"""
     try:
         # Read 3D LUT
         out_lut = colour.read_LUT(os.path.join(settings.main_directory, r'Calibration\Correction Profiles',
-                                               in_height + '.cube'))
-        print(f"Read correction profile '{in_height}'.")
+                                               in_name))
+        print(f"Read correction profile '{in_name}'.")
     except BaseException as error:
         utilities.print_color(f"An exception occurred: {error}", 'error')
         return None
@@ -509,7 +511,7 @@ def read_reference(ref_name):
     return ref_info, ref_values
 
 
-def measure_series(path, ref_name, mode, measurement_name):
+def measure_series(path, ref_name, mode, measurement_name): 
     """Measure series color, mode 0: area, 1: line"""
     global selected_points
 
@@ -697,6 +699,199 @@ def measure_series(path, ref_name, mode, measurement_name):
     # Write measurement data to .csv file
     utilities.write_csv(series_data, data_name,
                         os.path.join(sample_path(file_names[0]), 'Measurements', measurement_name))
+    
+
+def measure_3D(in_img, img_name, rec_number):
+    """Measure data inside a rectangle and draw rectangle + number on image"""
+
+    print()
+
+    rectangle = get_roi(in_img) 
+    img_scale = rectangle[3]
+    roi = rectangle[1]  # Measurement area
+    lab = get_average_color(rectangle[0]) # Average color of selected area
+
+    print("Measuring image color inside the selected area...")
+    out_data = [('file + rec number', 'L*', 'a*', 'b*')]  # Data headers
+    # Add measured data to write list
+    out_data.append([img_name.split('.')[0] + f"_{rec_number}", lab[0], lab[1], lab[2]])  
+
+    return roi, out_data, img_scale, lab
+
+
+def draw_rec(in_img, roi, img_scale, rec_number):
+    """Draw rectangle and number on image"""
+    cv.rectangle(in_img[0], (roi[0], roi[1]), (roi[0] + roi[2], roi[1] + roi[3]),
+                                                            (0, 0, main_script.max_val[in_img[1][0][1]]), 3)
+    middle = ((roi[0]+roi[2]//2), (roi[1]+roi[3]//2))
+    cv.putText(in_img[0], str(rec_number), middle, cv.FONT_HERSHEY_SIMPLEX, round((arrow_width - 2) / img_scale), 
+               (main_script.max_val[in_img[1][0][1]], 0, 0), round((arrow_width - 1) / img_scale), cv.LINE_AA)
+    out_img = image_manipulation.scale_image((in_img[0], in_img[1]))[0]
+    return out_img
+
+
+def area_color_image(lab_values, in_img):
+    """Create a visualization of area average colors"""
+
+    spacing = 5 # Pixels between colored squares
+
+    n = len(lab_values)
+    cols = math.ceil(math.sqrt(n * settings.max_window[0] / settings.max_window[1])) # column number
+    rows = math.ceil(n / cols) # row number
+
+    rec_width = (settings.max_window[0] - (cols + 1) * spacing) // cols 
+    rec_height = (settings.max_window[1] - (rows + 1) * spacing) // rows
+    rec_side = min(rec_width, rec_height) # color square size
+
+    in_img[0][:] = 0 # make sure background image is black
+
+    for i, color in enumerate(lab_values):
+        # where each color square is located
+        row = i // cols 
+        col = i % cols
+        x = spacing + col * (rec_side + spacing)
+        y = spacing + row * (rec_side + spacing)
+
+        # add the color
+        in_img[0][y:y+rec_side, x:x+rec_side] = color
+        font_size = 0.65
+        font_color = (0,0,0) if color[0] > 20 else (255,255,255)
+
+        # add square number and CIELAB values for display
+        cv.putText(in_img[0], f"{i+1}", (x+10,y+20), cv.FONT_HERSHEY_SIMPLEX, font_size, font_color, 2, cv.LINE_AA)
+        cv.putText(in_img[0], f"L={color[0]:.2f}", (x+10,y+40), cv.FONT_HERSHEY_SIMPLEX, font_size, font_color, 2, cv.LINE_AA)
+        cv.putText(in_img[0], f"a={color[1]:.2f}", (x+10,y+60), cv.FONT_HERSHEY_SIMPLEX, font_size, font_color, 2, cv.LINE_AA)
+        cv.putText(in_img[0], f"b={color[2]:.2f}", (x+10,y+80), cv.FONT_HERSHEY_SIMPLEX, font_size, font_color, 2, cv.LINE_AA)
+
+    x_end = (cols + 1) * spacing + cols * rec_side
+    y_end = (rows + 1) * spacing + rows * rec_side
+    in_img = (in_img[0][0:y_end, 0:x_end], in_img[1])
+    
+    return in_img
+
+
+def measure_2D(in_img, img_name, arrow_number, px_scale, measure_mode, avg_window):
+    """Measure data along a line and draw arrow + number on image"""
+    global selected_points
+
+    # measure mode 
+    # 0 = average color calculated for each line and used as reference for CIEDE2000
+    # 1 = The starting point of each arrow will be the reference color.
+    # 2 = average color of the whole input image used as reference
+
+    px_scale = px_scale / 1000  # Convert to mm/px
+    img_c, img_scale = image_manipulation.scale_image(image_manipulation.convert_color(in_img, 'show'))
+    prompt = settings.prompts['line']
+
+    # Only accept rotation with none (= no rotation or previous rotation if adjusting) or both selection points
+    while True:
+        show_image(prompt, img_c, False)
+        cv.setMouseCallback(prompt, image_event, param=[prompt, img_c])
+        key_pressed = wait_key()
+        if key_pressed == 'escape':
+            # Cancel measurement
+            return None
+        elif key_pressed == 'enter' and all(np.sum(elem) != -2 for elem in selected_points):
+            # Use selected line
+            break
+    cv.destroyWindow(prompt)
+    line_points = np.divide(selected_points, img_scale)  # Scale selection
+    selected_points = ((-1, -1), (-1, -1))  # Clear selection
+
+    print()
+    print("Measuring image color along the line...")
+
+    # Calculate line length and direction
+    line_points = ((round(line_points[0][0]), round(line_points[0][1])),
+                    (round(line_points[1][0]), round(line_points[1][1])))
+    line_pol = (round(math.dist(line_points[0], line_points[1])),
+                utilities.get_angle(line_points[0], line_points[1]))
+    range_vertical = True
+    if 45 < line_pol[1] < 135 or -135 < line_pol[1] < -45:
+        range_vertical = False
+
+    # Calculate reference color based on measuring mode
+    if measure_mode == 0:
+        start_y = min(line_points[0][1],line_points[1][1])
+        end_y = max(line_points[0][1],line_points[1][1])
+        start_x = min(line_points[0][0],line_points[1][0])
+        end_x = max(line_points[0][0],line_points[1][0])
+        ref_lab = get_average_color((in_img[0][start_y:end_y, start_x:end_x],in_img[1]))
+        print(f"The average CIELAb of arrow {arrow_number}: {ref_lab}")
+    elif measure_mode == 1:
+        ref_lab = in_img[0][line_points[0][1]][line_points[0][0]]
+        print(f"The CIELAb of the starting point of arrow {arrow_number}: {ref_lab}")
+    else:
+        ref_lab = get_average_color(in_img)
+        print(f"The average CIELAb of the image: {ref_lab}")
+
+    image_data = [('file and number', 'x', 'CIEDE2000', 'L*', 'a*', 'b*')]  # Data headers
+    image_data.append([str(img_name).split('.')[0] + str(arrow_number), [], [], [], [], []]) # File name
+ 
+    for x in range(0, line_pol[0] + 1, avg_window):
+        # Average over pixels (otherwise messy visualization)
+        lab_list = []
+        for i in range(avg_window):
+            px_index = x + i
+            if px_index > line_pol[0]:
+                break
+        x_point = np.sum((line_points[0], cvt_point((px_index, line_pol[1]), -2)), axis=0)
+        sum_color = (0, 0, 0)
+        for j in range(round(arrow_width / img_scale)):
+            offset = -int(round(arrow_width / img_scale) / 2) + j
+            if range_vertical:
+                offset_point = (round(x_point[0]), round(x_point[1] + offset))
+            else:
+                offset_point = (round(x_point[0] + offset), round(x_point[1]))
+            sum_color += in_img[0][offset_point[1]][offset_point[0]]
+        x_lab = (np.divide(sum_color, round(arrow_width / img_scale)), in_img[1])
+        lab_list.append(x_lab[0])
+
+        x_lab_average = np.array(lab_list).mean(axis=0)
+
+        image_data[1][1].append(px_scale * (x + avg_window/2))  # x (dist. along line)
+        image_data[1][2].append(colour.delta_E(ref_lab, x_lab_average, method='CIE 2000'))  # CIEDE 2000
+        image_data[1][3].append(x_lab_average[0])  # L*
+        image_data[1][4].append(x_lab_average[1])  # a*
+        image_data[1][5].append(x_lab_average[2])  # b*
+
+    # Average colors of each arrow
+    averages = (np.mean(image_data[1][2]), np.mean(image_data[1][3]), np.mean(image_data[1][4]), 
+                np.mean(image_data[1][5]))
+    
+    extreme_values = []
+    for i in range (4):
+        extreme_values.append((min(image_data[1][i+2]),max(image_data[1][i+2])))
+
+    return image_data, averages, line_points, img_scale, extreme_values
+
+
+def draw_arrow(in_img, line_points, img_scale, arrow_number):
+    # Draw selected line on image
+    middle = ((line_points[1][0]+line_points[0][0])//2, (line_points[1][1]+line_points[0][1])//2)
+    cv.arrowedLine(in_img[0], line_points[0], line_points[1], (0, 0, main_script.max_val[in_img[1][0][1]]),
+                    round((arrow_width - 1) / img_scale),
+                    tipLength=(25 / math.dist(line_points[0], line_points[1]) / img_scale))
+    # Number of line
+    cv.putText(in_img[0], str(arrow_number), middle, cv.FONT_HERSHEY_SIMPLEX, round((arrow_width - 1) / img_scale), 
+               (main_script.max_val[in_img[1][0][1]], 0, 0), round((arrow_width - 1) / img_scale), cv.LINE_AA)
+    img_l = image_manipulation.scale_image((in_img[0], in_img[1]))[0]
+    
+    return img_l
+
+
+def add_plot(axes, in_data, average, extreme_values, arrow_nro = None):
+    """Plot data to existing figures"""
+    for i in range(np.size(axes)):
+        axes[i].plot(in_data[1][1], in_data[1][i+2], '.-', markersize = 3, 
+                 label = str(arrow_nro) + ', Avg:' + "{:.2f}".format(average[i]) + 
+                 ', Range:[' + "{:.2f}".format(extreme_values[i][0]) + '-' + "{:.2f}".format(extreme_values[i][1]) + ']', 
+                 linewidth = 0.4) 
+    if arrow_nro:
+        for ax in axes:
+            ax.legend()
+
+    return axes
 
 
 def get_roi(in_img, mode=0, in_roi=(0, 0, 0, 0), show_format=False):
@@ -756,6 +951,9 @@ def get_roi(in_img, mode=0, in_roi=(0, 0, 0, 0), show_format=False):
                    abs(ref_points[1][0] - ref_points[0][0]), abs(ref_points[1][1] - ref_points[0][1]))
             roi = tuple(round(coord) for coord in roi)
             out_roi = roi
+
+        return ((in_img[0][int(roi[1]):int(roi[1] + roi[3]), int(roi[0]):int(roi[0] + roi[2])], in_img[1]),
+            out_roi, key_pressed, img_scale)
 
     # Default to full image
     if np.sum(roi) == 0 or key_pressed == 'space':
