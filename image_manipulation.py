@@ -37,9 +37,8 @@ def convert_color(in_cols, conversion, is_thread=False, operations=1, gray_refs=
                 # RGB (0 - 1) -> XYZ D50 (0 - 1)
                 xyz_vals = colour.RGB_to_XYZ(main_script.color_model[split_cols[i][1][0][0]]
                                              .cctf_decoding(rgb_vals),
-                                             main_script.color_model[split_cols[i][1][0][0]].whitepoint,
-                                             colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer']['D50'],
-                                             main_script.color_model[split_cols[i][1][0][0]].matrix_RGB_to_XYZ)
+                                             colourspace=main_script.color_model[split_cols[i][1][0][0]],
+                                             illuminant=colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer']['D50'])
                 # XYZ D50 (0 - 1) -> LAB D50 (0 - 100, -100 - 100, -100 - 100)
                 lab_vals = colour.XYZ_to_Lab(xyz_vals, illuminant=colour.CCS_ILLUMINANTS[
                     'CIE 1931 2 Degree Standard Observer']['D50'])
@@ -54,9 +53,7 @@ def convert_color(in_cols, conversion, is_thread=False, operations=1, gray_refs=
                 # XYZ (0 - 1) -> XYZ D50 (0 - 1)
                 xyz_vals = colour.chromatic_adaptation(xyz_vals, colour.xy_to_XYZ(
                     colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer'][in_cols[1]]),
-                                                       colour.xy_to_XYZ(
-                                                           colour.CCS_ILLUMINANTS[
-                                                               'CIE 1931 2 Degree Standard Observer']['D50']))
+                    colour.xy_to_XYZ(colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer']['D50']))
 
                 # XYZ D50 (0 - 1) -> LAB D50 (0 - 100, -100 - 100, -100 - 100)
                 lab_vals = colour.XYZ_to_Lab(xyz_vals, illuminant=colour.CCS_ILLUMINANTS[
@@ -73,10 +70,9 @@ def convert_color(in_cols, conversion, is_thread=False, operations=1, gray_refs=
                     # XYZ D50 (0 - 1) -> RGB (0 - 1)
                     rgb_vals = main_script.color_model[settings.output_color_space].cctf_encoding(colour.XYZ_to_RGB(
                         xyz_vals,
-                        colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer']['D50'],
-                        main_script.color_model[settings.output_color_space].whitepoint,
-                        main_script.color_model[settings.output_color_space].matrix_XYZ_to_RGB))
-
+                        colourspace = main_script.color_model[settings.output_color_space],
+                        illuminant = colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer']['D50']))
+                    
                     # RGB (0 - 1) -> BGR (0 - 2^depth-1)
                     bgr_vals = (np.interp(np.flip(rgb_vals, -1),
                                           (0, 1), (0, main_script.max_val[settings.output_depth]))
@@ -88,9 +84,8 @@ def convert_color(in_cols, conversion, is_thread=False, operations=1, gray_refs=
                     # XYZ D50 (0 - 1) -> sRGB (0 - 1)
                     rgb_vals = main_script.color_model[0].cctf_encoding(colour.XYZ_to_RGB(
                         xyz_vals,
-                        colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer']['D50'],
-                        main_script.color_model[0].whitepoint,
-                        main_script.color_model[0].matrix_XYZ_to_RGB))
+                        colourspace = main_script.color_model[0],
+                        illuminant = colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer']['D50']))
 
                     # sRGB (0 - 1) -> BGR (0 - 255)
                     bgr_vals = (np.interp(np.flip(rgb_vals, -1), (0, 1),
@@ -118,9 +113,8 @@ def convert_color(in_cols, conversion, is_thread=False, operations=1, gray_refs=
                     # XYZ D50 (0 - 1) -> sRGB (0 - 1)
                     rgb_vals = main_script.color_model[0].cctf_encoding(colour.XYZ_to_RGB(
                         xyz_vals,
-                        colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer']['D50'],
-                        main_script.color_model[0].whitepoint,
-                        main_script.color_model[0].matrix_XYZ_to_RGB))
+                        colourspace = main_script.color_model[0],
+                        illuminant = colour.CCS_ILLUMINANTS['CIE 1931 2 Degree Standard Observer']['D50']))                   
 
                     rgb_vals = np.clip(rgb_vals, 0, 1)  # Clip to allowed range
 
@@ -128,8 +122,7 @@ def convert_color(in_cols, conversion, is_thread=False, operations=1, gray_refs=
 
                 elif conversion == 'xy':  # LAB(D50) -> xy
                     # XYZ D50 (0 - 1) -> xy (0 - 1)
-                    xy_vals = colour.XYZ_to_xy(xyz_vals, illuminant=colour.CCS_ILLUMINANTS[
-                        'CIE 1931 2 Degree Standard Observer']['D50'])
+                    xy_vals = colour.XYZ_to_xy(xyz_vals) 
 
                     out_cols.append(xy_vals)
 
@@ -230,6 +223,7 @@ def crop_samples(sample_name, adjust=False, ref_gray=False, crop_settings=None):
     if not ref_gray:  # If cropping reference gray, no need to read reference data
         ref_crop_data = image_utilities.read_crop(file_names[0])
         if ref_crop_data is not None:
+            print('1')
             start_file = ref_crop_data[1][0] + '.' + settings.output_extension
             # Check if cropped image exists, otherwise ignore existing data
             crop_exists = os.path.exists(os.path.join(rf'{os.path.join(settings.main_directory, path)}\Cropped',
@@ -238,15 +232,20 @@ def crop_samples(sample_name, adjust=False, ref_gray=False, crop_settings=None):
         else:
             start_file = file_names[0]  # Use first file alphabetically
             crop_exists = False
+            print('2')
 
         if not crop_exists or adjust:
             img = None
+            print('3')
             while img is None:  # Wait for successful read
                 img = image_utilities.read_image(start_file, path, convert=False)
+                print('4')
             if adjust and ref_crop_data is not None and crop_exists:
+                print('5')
                 # Start with previous crop data
                 ref_crop = match_crop(img, 0, (ref_crop_data[2], ref_crop_data[3]), convert=False)
             else:
+                print('6')
                 ref_crop = match_crop(img, 0, convert=False)
             if ref_crop is None:
                 utilities.print_color("Discarding crop data.", 'warning')
@@ -346,6 +345,7 @@ def crop_samples(sample_name, adjust=False, ref_gray=False, crop_settings=None):
                 ref_crop = crop_settings
             else:
                 ref_crop = match_crop(img, 0, convert=False)
+            
 
         if crop_settings is None:
             new_crop_settings[0] = ref_crop[0]
@@ -677,3 +677,5 @@ def get_image_range(in_img, in_range):  # in_range format (corner): ((left x, ri
                    out_img[1])
 
     return out_img
+
+
